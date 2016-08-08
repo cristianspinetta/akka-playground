@@ -10,7 +10,7 @@ object Projects extends Build {
     .settings(basicSettings: _*)
     .settings(formatSettings: _*)
     .settings(noPublishing: _*)
-    .aggregate(binaryTree, akkaHttpMicroservice)
+    .aggregate(binaryTree, akkaHttpMicroservice, kamonSprayPlayground, kamonAkkaHttpPlayground)
 
   lazy val binaryTree = Project("binary-tree",file("binary-tree"))
     .settings(basicSettings: _*)

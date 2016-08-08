@@ -1,6 +1,6 @@
 package playground
 
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{ Actor, ActorSystem, Props }
 import com.typesafe.config.ConfigFactory
 import kamon.Kamon
 import kamon.metric.SubscriptionsDispatcher.TickMetricSnapshot
@@ -39,16 +39,16 @@ object SprayServer extends App with SimpleRoutingApp with RequestBuilding with K
         }
       }
     } ~
-    path("go-outside") {
-      get {
-        traceName("GetGoOutside") {
-          complete {
-            pipeline(Get(s"http://${config.getString("services.ip-api.host")}:${config.getString("services.ip-api.port")}/"))
+      path("go-outside") {
+        get {
+          traceName("GetGoOutside") {
+            complete {
+              pipeline(Get(s"http://${config.getString("services.ip-api.host")}:${config.getString("services.ip-api.port")}/"))
+            }
           }
         }
-      }
 
-    }
+      }
   }
 
   Kamon.metrics.subscribe("**", "**", system.actorOf(Props[PrintAllMetrics], "printer"))
@@ -58,7 +58,7 @@ object SprayServer extends App with SimpleRoutingApp with RequestBuilding with K
 class PrintAllMetrics extends Actor {
 
   def receive = {
-    case TickMetricSnapshot(from, to, metrics) =>
+    case TickMetricSnapshot(from, to, metrics) ⇒
       println("================================================================================")
       println(metrics.map({
         case (entity, snapshot) ⇒

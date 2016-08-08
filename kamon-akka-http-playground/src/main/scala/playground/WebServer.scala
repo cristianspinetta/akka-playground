@@ -1,6 +1,6 @@
 package playground
 
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{ Actor, ActorSystem, Props }
 import akka.event.Logging
 import akka.http.scaladsl._
 import akka.http.scaladsl.marshalling.ToResponseMarshallable
@@ -33,13 +33,20 @@ object WebServer extends App {
         }
       }
     } ~
-    path("go-outside") {
-      get {
-        complete {
-          Http().singleRequest(HttpRequest(uri = s"http://${config.getString("services.ip-api.host")}:${config.getString("services.ip-api.port")}/"))
+      path("go-outside") {
+        get {
+          complete {
+            Http().singleRequest(HttpRequest(uri = s"http://${config.getString("services.ip-api.host")}:${config.getString("services.ip-api.port")}/"))
+          }
+        }
+      } ~
+      path("fail") {
+        get {
+          complete {
+            throw new RuntimeException("This is an intentionally runtime exception.")
+          }
         }
       }
-    }
   }
 
   Http().bindAndHandle(routes, config.getString("http.interface"), config.getInt("http.port"))
@@ -50,13 +57,13 @@ object WebServer extends App {
 class PrintAllMetrics extends Actor {
 
   def receive = {
-    case TickMetricSnapshot(from, to, metrics) =>
+    case TickMetricSnapshot(from, to, metrics) ⇒
       println("================================================================================")
       println(metrics.map({
         case (entity, snapshot) ⇒
           s"""${entity.category.padTo(20, ' ')} > ${entity.name}   ${entity.tags}
-             |      Metrics:
-             |      ${snapshot.metrics}""".stripMargin
+             |
+             |${snapshot.metrics.map(metric ⇒ s"    ${metric._1} -> ${metric._2}") mkString "\n"}""".stripMargin
       }).toList.sorted.mkString("\n"))
   }
 }
