@@ -1,23 +1,28 @@
 package playground
 
-import akka.actor.{ Actor, ActorSystem, Props }
+import akka.NotUsed
+import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl._
-import akka.http.scaladsl.marshalling.ToResponseMarshallable
-import akka.http.scaladsl.model.HttpRequest
-import akka.http.scaladsl.model.StatusCodes._
+import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.PathMatchers.Segment
-import akka.stream.ActorMaterializer
+import akka.stream.scaladsl._
+import akka.stream.{ ActorAttributes, ActorMaterializer, Materializer, Supervision }
 import com.typesafe.config.ConfigFactory
 import kamon.Kamon
-import kamon.metric.SubscriptionsDispatcher.TickMetricSnapshot
+
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.util.Random
 
 object WebServer extends App {
 
   Kamon.start()
 
   val config = ConfigFactory.load()
+
+  val port: Int = config.getInt("http.port")
+  val interface: String = config.getString("http.interface")
 
   implicit val system = ActorSystem()
   implicit val executor = system.dispatcher
@@ -49,21 +54,64 @@ object WebServer extends App {
       }
   }
 
-  Http().bindAndHandle(routes, config.getString("http.interface"), config.getInt("http.port"))
+  val bindingFuture = Http().bindAndHandle(routes, interface, port)
 
-  Kamon.metrics.subscribe("**", "**", system.actorOf(Props[PrintAllMetrics], "printer"))
+  val matGraph = ProduceMetrics.activate(500 millis, Vector(
+    s"/ok",
+    s"/go-outside",
+    s"/fail"
+  ))
+
+  println(s"Server online at http://$interface:$port/\nPress RETURN to stop...")
+
+  Console.readLine() // for the future transformations
+
+//  matGraph.cancel()
+
+  val stopServerFut = bindingFuture
+    .flatMap(_.unbind()) // trigger unbinding from the port
+    .foreach(_ ⇒ system.terminate()) // and shutdown when done
+
 }
 
-class PrintAllMetrics extends Actor {
+object ProduceMetrics {
 
-  def receive = {
-    case TickMetricSnapshot(from, to, metrics) ⇒
-      println("================================================================================")
-      println(metrics.map({
-        case (entity, snapshot) ⇒
-          s"""${entity.category.padTo(20, ' ')} > ${entity.name}   ${entity.tags}
-             |
-             |${snapshot.metrics.map(metric ⇒ s"    ${metric._1} -> ${metric._2}") mkString "\n"}""".stripMargin
-      }).toList.sorted.mkString("\n"))
+  implicit val system = ActorSystem()
+  implicit val executor = system.dispatcher
+  implicit val materializer = ActorMaterializer()
+
+  val logger = Logging(system, getClass)
+
+  def activate(tickInterval: FiniteDuration, endpoints: Vector[String], interface: String = "localhost", port: Int = 8080)
+              (implicit materializer: Materializer, system: ActorSystem): Unit/*Cancellable*/ = {
+
+    implicit val materializer = ActorMaterializer()
+
+    val timeout = 2 seconds
+
+    val decider: Supervision.Decider = {
+      case exc =>
+        logger.error(s"Exception: $exc")
+        Supervision.Resume
+    }
+
+    val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] = {
+      Http().outgoingConnection(interface, port)
+    }
+
+    val tickSource =
+      Source.tick(tickInterval, tickInterval, NotUsed)
+      .map(_ => {
+        val httpRequest = HttpRequest(uri = endpoints(Random.nextInt(endpoints.size)))
+        logger.info(s"Request: ${httpRequest.getUri()}")
+        httpRequest
+      })
+
+    val cancellable = tickSource
+      .viaMat(connectionFlow)(Keep.right)
+      .toMat(Sink.foreach { case httpResponse => httpResponse.toStrict(timeout) })(Keep.left)
+      .withAttributes(ActorAttributes.supervisionStrategy(decider))
+      .run()
+
   }
 }
